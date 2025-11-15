@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -62,13 +64,8 @@ func NewProxyServer(config *Config, logger *Logger) *ProxyServer {
 
 // Start starts the proxy server
 func (p *ProxyServer) Start() error {
-	mux := http.NewServeMux()
-
-	// Health endpoint (not subject to proxy middleware)
-	mux.HandleFunc("/healthz", p.healthHandler())
-
 	// Add middleware and handlers
-	handler := p.loggingMiddleware(
+	proxyChain := p.loggingMiddleware(
 		p.authMiddleware(
 			p.hostFilterMiddleware(
 				p.proxyHandler(),
@@ -76,13 +73,27 @@ func (p *ProxyServer) Start() error {
 		),
 	)
 
-	mux.HandleFunc("/", handler)
+	healthHandler := p.healthHandler()
+	rootHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Serve health endpoint without proxy middleware
+		if r.Method != http.MethodConnect {
+			if r.URL != nil {
+				path := r.URL.Path
+				if path == "/healthz" || path == "/health" {
+					healthHandler(w, r)
+					return
+				}
+			}
+		}
+
+		proxyChain(w, r)
+	})
 
 	// Configure server
 	addr := net.JoinHostPort(p.config.Host, p.config.Port)
 	p.server = &http.Server{
 		Addr:           addr,
-		Handler:        mux,
+		Handler:        rootHandler,
 		ReadTimeout:    p.config.ReadTimeout,
 		WriteTimeout:   p.config.WriteTimeout,
 		IdleTimeout:    p.config.IdleTimeout,
@@ -204,17 +215,14 @@ func (p *ProxyServer) handleTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 	defer targetConn.Close()
 
-	// Send 200 Connection Established
-	w.WriteHeader(http.StatusOK)
-
-	// Hijack the connection
+	// Hijack the connection so we can proxy raw TCP
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 
-	clientConn, _, err := hj.Hijack()
+	clientConn, buf, err := hj.Hijack()
 	if err != nil {
 		p.logger.Error("Failed to hijack connection", map[string]interface{}{
 			"error": err.Error(),
@@ -222,6 +230,24 @@ func (p *ProxyServer) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer clientConn.Close()
+
+	if buf == nil {
+		buf = bufio.NewReadWriter(bufio.NewReader(clientConn), bufio.NewWriter(clientConn))
+	}
+
+	// Respond to client that tunnel is established
+	if _, err := buf.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+		p.logger.Error("Failed to write tunnel response", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+	if err := buf.Flush(); err != nil {
+		p.logger.Error("Failed to flush tunnel response", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
 
 	start := time.Now()
 
@@ -374,6 +400,13 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hijacker, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hijacker.Hijack()
+	}
+	return nil, nil, fmt.Errorf("response writer does not support hijacking")
 }
 
 // copyHeaders copies HTTP headers from source to destination
