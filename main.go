@@ -293,7 +293,7 @@ func (p *ProxyServer) handleTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Respond to client that tunnel is established
-	if _, err := buf.WriteString("HTTP/1.1 200 Connection Established\\r\\n\\r\\n"); err != nil {
+	if _, err := buf.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 		p.logger.Error("Failed to write tunnel response", map[string]interface{}{
 			"error": err.Error(),
 		})
