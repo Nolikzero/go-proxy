@@ -264,10 +264,7 @@ func (p *ProxyServer) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer targetConn.Close()
-
-	// Set deadlines for connection
-	deadline := time.Now().Add(p.config.WriteTimeout)
-	targetConn.SetDeadline(deadline)
+	setKeepAlive(targetConn, p.config.TunnelKeepAliveInterval)
 
 	// Hijack the connection so we can proxy raw TCP
 	hj, ok := w.(http.Hijacker)
@@ -284,13 +281,19 @@ func (p *ProxyServer) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer clientConn.Close()
-
-	// Set deadline for client connection
-	clientConn.SetDeadline(deadline)
+	setKeepAlive(clientConn, p.config.TunnelKeepAliveInterval)
 
 	if buf == nil {
 		buf = bufio.NewReadWriter(bufio.NewReader(clientConn), bufio.NewWriter(clientConn))
 	}
+
+	// Wrap connections with idle timeout management so long-lived tunnels stay open
+	idleTimeout := p.config.TunnelIdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = p.config.IdleTimeout
+	}
+	clientStream := newIdleTimeoutConn(clientConn, idleTimeout)
+	targetStream := newIdleTimeoutConn(targetConn, idleTimeout)
 
 	// Respond to client that tunnel is established
 	if _, err := buf.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
@@ -314,14 +317,14 @@ func (p *ProxyServer) handleTunnel(w http.ResponseWriter, r *http.Request) {
 
 	// Client to target
 	go func() {
-		n, err := io.Copy(targetConn, clientConn)
+		n, err := io.Copy(targetStream, clientStream)
 		bytesClientToTarget = n
 		errChan <- err
 	}()
 
 	// Target to client
 	go func() {
-		n, err := io.Copy(clientConn, targetConn)
+		n, err := io.Copy(clientStream, targetStream)
 		bytesTargetToClient = n
 		errChan <- err
 	}()
@@ -329,9 +332,15 @@ func (p *ProxyServer) handleTunnel(w http.ResponseWriter, r *http.Request) {
 	// Wait for first direction to complete
 	err = <-errChan
 	if err != nil && err != io.EOF {
-		p.logger.Debug("Tunnel copy error", map[string]interface{}{
-			"error": err.Error(),
-		})
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			p.logger.Debug("Tunnel idle timeout", map[string]interface{}{
+				"error": netErr.Error(),
+			})
+		} else {
+			p.logger.Debug("Tunnel copy error", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
 	}
 
 	// Close connections to force the other direction to finish
@@ -606,6 +615,42 @@ func getScheme(r *http.Request) string {
 	}
 
 	return "http"
+}
+
+// newIdleTimeoutConn wraps a net.Conn to refresh read/write deadlines before each operation.
+func newIdleTimeoutConn(conn net.Conn, idleTimeout time.Duration) net.Conn {
+	if conn == nil || idleTimeout <= 0 {
+		return conn
+	}
+	return &idleTimeoutConn{Conn: conn, idleTimeout: idleTimeout}
+}
+
+type idleTimeoutConn struct {
+	net.Conn
+	idleTimeout time.Duration
+}
+
+func (c *idleTimeoutConn) Read(b []byte) (int, error) {
+	if c.idleTimeout > 0 {
+		_ = c.Conn.SetReadDeadline(time.Now().Add(c.idleTimeout))
+	}
+	return c.Conn.Read(b)
+}
+
+func (c *idleTimeoutConn) Write(b []byte) (int, error) {
+	if c.idleTimeout > 0 {
+		_ = c.Conn.SetWriteDeadline(time.Now().Add(c.idleTimeout))
+	}
+	return c.Conn.Write(b)
+}
+
+func setKeepAlive(conn net.Conn, period time.Duration) {
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		_ = tcpConn.SetKeepAlive(true)
+		if period > 0 {
+			_ = tcpConn.SetKeepAlivePeriod(period)
+		}
+	}
 }
 
 // main function

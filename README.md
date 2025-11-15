@@ -85,6 +85,13 @@ The proxy server is configured through environment variables. All configuration 
 | `PROXY_MAX_IDLE_CONNS` | `100` | Maximum idle connections |
 | `PROXY_MAX_IDLE_CONNS_PER_HOST` | `10` | Maximum idle connections per host |
 
+### Tunnel & Long Connection Configuration
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `PROXY_TUNNEL_IDLE_TIMEOUT` | `30m` | Idle timeout for CONNECT tunnels (set `0` to disable) |
+| `PROXY_TUNNEL_KEEP_ALIVE_INTERVAL` | `1m` | TCP keep-alive interval for tunnel sockets (set `0` to keep system default) |
+
 ### Security Configuration
 
 | Environment Variable | Default | Description |
@@ -183,6 +190,20 @@ export PROXY_LOG_LEVEL=info
 export PROXY_LOG_FORMAT=json
 export PROXY_MAX_IDLE_CONNS=200
 export PROXY_MAX_IDLE_CONNS_PER_HOST=20
+export PROXY_TUNNEL_IDLE_TIMEOUT=2h
+export PROXY_TUNNEL_KEEP_ALIVE_INTERVAL=30s
+go run .
+```
+
+### Long-Lived AI Session Configuration
+
+For interactive AI workloads or streaming sessions that must keep a CONNECT tunnel open for minutes or hours, relax the tunnel-specific settings while leaving normal HTTP timeouts in place:
+
+```bash
+export PROXY_TUNNEL_IDLE_TIMEOUT=4h
+export PROXY_TUNNEL_KEEP_ALIVE_INTERVAL=15s
+export PROXY_RATE_LIMIT_RPS=200
+export PROXY_RATE_LIMIT_BURST=400
 go run .
 ```
 

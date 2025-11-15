@@ -123,13 +123,28 @@ export PROXY_READ_TIMEOUT=10s
 export PROXY_WRITE_TIMEOUT=10s
 export PROXY_CONNECT_TIMEOUT=5s
 export PROXY_IDLE_TIMEOUT=60s
+export PROXY_TUNNEL_IDLE_TIMEOUT=2m
+export PROXY_TUNNEL_KEEP_ALIVE_INTERVAL=30s
 
 # Relaxed timeouts (for slow APIs/large transfers)
 export PROXY_READ_TIMEOUT=60s
 export PROXY_WRITE_TIMEOUT=60s
 export PROXY_CONNECT_TIMEOUT=15s
 export PROXY_IDLE_TIMEOUT=180s
+export PROXY_TUNNEL_IDLE_TIMEOUT=30m
+export PROXY_TUNNEL_KEEP_ALIVE_INTERVAL=1m
 ```
+
+#### Long-Lived AI / Streaming Sessions
+
+```bash
+export PROXY_TUNNEL_IDLE_TIMEOUT=4h   # Keep CONNECT tunnels alive while traffic is flowing
+export PROXY_TUNNEL_KEEP_ALIVE_INTERVAL=15s
+export PROXY_MAX_IDLE_CONNS=500
+export PROXY_MAX_IDLE_CONNS_PER_HOST=50
+```
+
+> ℹ️ The regular HTTP server timeouts stay protective, while tunnel-specific settings make sure hijacked TCP streams remain healthy for multi-minute or multi-hour conversations.
 
 ### Request/Response Size Limits
 

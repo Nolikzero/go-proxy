@@ -12,11 +12,13 @@ import (
 // Config holds all configuration for the proxy server
 type Config struct {
 	// Server configuration
-	Port         string        `json:"port"`
-	Host         string        `json:"host"`
-	ReadTimeout  time.Duration `json:"read_timeout"`
-	WriteTimeout time.Duration `json:"write_timeout"`
-	IdleTimeout  time.Duration `json:"idle_timeout"`
+	Port                    string        `json:"port"`
+	Host                    string        `json:"host"`
+	ReadTimeout             time.Duration `json:"read_timeout"`
+	WriteTimeout            time.Duration `json:"write_timeout"`
+	IdleTimeout             time.Duration `json:"idle_timeout"`
+	TunnelIdleTimeout       time.Duration `json:"tunnel_idle_timeout"`
+	TunnelKeepAliveInterval time.Duration `json:"tunnel_keep_alive_interval"`
 
 	// TLS configuration
 	TLSCertFile string `json:"tls_cert_file"`
@@ -54,11 +56,13 @@ type Config struct {
 func LoadConfig() *Config {
 	config := &Config{
 		// Server defaults
-		Port:         getEnv("PROXY_PORT", "8080"),
-		Host:         getEnv("PROXY_HOST", ""),
-		ReadTimeout:  getDurationEnv("PROXY_READ_TIMEOUT", 30*time.Second),
-		WriteTimeout: getDurationEnv("PROXY_WRITE_TIMEOUT", 30*time.Second),
-		IdleTimeout:  getDurationEnv("PROXY_IDLE_TIMEOUT", 120*time.Second),
+		Port:                    getEnv("PROXY_PORT", "8080"),
+		Host:                    getEnv("PROXY_HOST", ""),
+		ReadTimeout:             getDurationEnv("PROXY_READ_TIMEOUT", 30*time.Second),
+		WriteTimeout:            getDurationEnv("PROXY_WRITE_TIMEOUT", 30*time.Second),
+		IdleTimeout:             getDurationEnv("PROXY_IDLE_TIMEOUT", 120*time.Second),
+		TunnelIdleTimeout:       getDurationEnv("PROXY_TUNNEL_IDLE_TIMEOUT", 30*time.Minute),
+		TunnelKeepAliveInterval: getDurationEnv("PROXY_TUNNEL_KEEP_ALIVE_INTERVAL", time.Minute),
 
 		// TLS defaults
 		TLSCertFile:   getEnv("PROXY_TLS_CERT_FILE", ""),
@@ -116,6 +120,12 @@ func (c *Config) Validate() error {
 	}
 	if c.IdleTimeout <= 0 {
 		errs = append(errs, errors.New("idle_timeout must be positive"))
+	}
+	if c.TunnelIdleTimeout < 0 {
+		errs = append(errs, errors.New("tunnel_idle_timeout cannot be negative"))
+	}
+	if c.TunnelKeepAliveInterval < 0 {
+		errs = append(errs, errors.New("tunnel_keep_alive_interval cannot be negative"))
 	}
 	if c.ConnectTimeout <= 0 {
 		errs = append(errs, errors.New("connect_timeout must be positive"))
