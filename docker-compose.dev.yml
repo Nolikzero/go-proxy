@@ -1,0 +1,6 @@
+services:
+  go-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: go-proxy:dev

@@ -28,7 +28,11 @@ go run .
 ### Option 2: Run with Docker
 
 ```bash
-# Build and run
+# Pull and run from GitHub Container Registry
+docker pull ghcr.io/nolikzero/go-proxy:latest
+docker run -p 8080:8080 ghcr.io/nolikzero/go-proxy:latest
+
+# Or build locally
 docker build -t go-proxy .
 docker run -p 8080:8080 go-proxy
 ```
@@ -36,14 +40,17 @@ docker run -p 8080:8080 go-proxy
 ### Option 3: Run with Docker Compose
 
 ```bash
-# Start the service
-docker-compose up -d
+# Production: Pull and run from registry
+docker compose up -d
+
+# Development: Build and run locally
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop the service
-docker-compose down
+docker compose down
 ```
 
 ## Configuration
@@ -487,6 +494,36 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **[CODE_REVIEW.md](CODE_REVIEW.md)** - Comprehensive code review and improvements summary
 - **[PRODUCTION.md](PRODUCTION.md)** - Production deployment guide with security, monitoring, and HA setup
 - **README.md** - This file (quick start and configuration reference)
+
+## CI/CD
+
+The project includes GitHub Actions workflow for automated Docker image builds:
+
+- **Automatic builds** on push to `main` branch
+- **Multi-platform support** (linux/amd64, linux/arm64)
+- **Semantic versioning** with git tags (e.g., `v1.0.0`)
+- **Security scanning** with Trivy vulnerability scanner
+- **Published to** GitHub Container Registry (ghcr.io)
+
+### Creating a Release
+
+```bash
+# Tag a new version
+git tag v1.0.0
+git push origin v1.0.0
+
+# GitHub Actions will automatically:
+# - Build the Docker image
+# - Run security scans
+# - Push to ghcr.io/nolikzero/go-proxy:1.0.0
+# - Update the :latest tag
+```
+
+### Available Images
+
+- `ghcr.io/nolikzero/go-proxy:latest` - Latest build from main branch
+- `ghcr.io/nolikzero/go-proxy:v1.0.0` - Specific version tag
+- `ghcr.io/nolikzero/go-proxy:main` - Latest main branch build
 
 ## Support
 

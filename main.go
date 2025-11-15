@@ -622,11 +622,6 @@ func main() {
 	// Create logger
 	logger := NewLogger(config)
 
-	logger.Info("Starting proxy server", map[string]interface{}{
-		"version": "1.0.0",
-		"config":  "validated",
-	})
-
 	// Initialize metrics
 	metrics := NewMetrics()
 

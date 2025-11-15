@@ -5,6 +5,7 @@ BINARY_NAME=go-proxy
 BINARY_PATH=./bin/$(BINARY_NAME)
 DOCKER_IMAGE=go-proxy
 DOCKER_TAG=latest
+GHCR_IMAGE=ghcr.io/nolikzero/go-proxy
 GO_VERSION=1.21
 
 # Build information
@@ -37,9 +38,11 @@ help:
 	@echo "  tidy           - Tidy go modules"
 	@echo "  docker-build   - Build Docker image"
 	@echo "  docker-run     - Run Docker container"
-	@echo "  docker-push    - Push Docker image"
-	@echo "  compose-up     - Start with docker-compose"
+	@echo "  docker-push    - Push Docker image to GHCR"
+	@echo "  compose-up     - Start with docker-compose (production)"
+	@echo "  compose-dev    - Start with docker-compose (development)"
 	@echo "  compose-down   - Stop docker-compose"
+	@echo "  compose-pull   - Pull latest image from registry"
 	@echo "  install        - Install binary to GOPATH/bin"
 	@echo "  release        - Build release binaries for multiple platforms"
 
@@ -162,29 +165,40 @@ docker-stop:
 
 .PHONY: docker-push
 docker-push: docker-build
-	@echo "Pushing Docker image..."
-	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
+	@echo "Pushing Docker image to GHCR..."
+	docker tag $(DOCKER_IMAGE):$(DOCKER_TAG) $(GHCR_IMAGE):$(DOCKER_TAG)
+	docker push $(GHCR_IMAGE):$(DOCKER_TAG)
 
 # Docker Compose targets
 .PHONY: compose-up
 compose-up:
-	@echo "Starting services with docker-compose..."
-	docker-compose up -d
+	@echo "Starting services with docker-compose (production)..."
+	docker compose up -d
+
+.PHONY: compose-dev
+compose-dev:
+	@echo "Starting services with docker-compose (development)..."
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+.PHONY: compose-pull
+compose-pull:
+	@echo "Pulling latest image from registry..."
+	docker compose pull
 
 .PHONY: compose-down
 compose-down:
 	@echo "Stopping services with docker-compose..."
-	docker-compose down
+	docker compose down
 
 .PHONY: compose-logs
 compose-logs:
 	@echo "Showing docker-compose logs..."
-	docker-compose logs -f
+	docker compose logs -f
 
 .PHONY: compose-restart
 compose-restart:
 	@echo "Restarting services with docker-compose..."
-	docker-compose restart
+	docker compose restart
 
 # Installation
 .PHONY: install
