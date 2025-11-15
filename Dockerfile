@@ -1,10 +1,10 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
 # Install ca-certificates and security updates
-RUN apk --no-cache add ca-certificates git && \\
+RUN apk --no-cache add ca-certificates git && \
     apk upgrade --no-cache
 
 # Copy go mod files
@@ -17,10 +17,10 @@ RUN go mod download && go mod verify
 COPY . .
 
 # Build the binary with security flags
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \\
-    -a -installsuffix cgo \\
-    -ldflags="-w -s -extldflags '-static'" \\
-    -trimpath \\
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -a -installsuffix cgo \
+    -ldflags="-w -s -extldflags '-static'" \
+    -trimpath \
     -o main .
 
 # Final stage
