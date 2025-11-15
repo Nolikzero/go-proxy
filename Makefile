@@ -6,7 +6,7 @@ BINARY_PATH=./bin/$(BINARY_NAME)
 DOCKER_IMAGE=go-proxy
 DOCKER_TAG=latest
 GHCR_IMAGE=ghcr.io/nolikzero/go-proxy
-GO_VERSION=1.21
+GO_VERSION=1.25.1
 
 # Build information
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
