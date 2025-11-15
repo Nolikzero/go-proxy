@@ -543,7 +543,6 @@ git push origin v1.0.0
 
 - `ghcr.io/nolikzero/go-proxy:latest` - Latest build from main branch
 - `ghcr.io/nolikzero/go-proxy:v1.0.0` - Specific version tag
-- `ghcr.io/nolikzero/go-proxy:main` - Latest main branch build
 
 ## Support
 

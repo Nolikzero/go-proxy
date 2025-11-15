@@ -21,7 +21,7 @@ type Metrics struct {
 	requestsInFlight  prometheus.Gauge
 	tunnelsActive     prometheus.Gauge
 	bytesTransferred  *prometheus.CounterVec
-	rateLimitExceeded *prometheus.CounterVec
+	rateLimitExceeded prometheus.Counter
 	authFailures      prometheus.Counter
 	hostBlocked       prometheus.Counter
 	upstreamErrors    *prometheus.CounterVec
@@ -72,12 +72,11 @@ func NewMetrics() *Metrics {
 			[]string{"direction"}, // "inbound" or "outbound"
 		)
 
-		rateLimitExceeded := prometheus.NewCounterVec(
+		rateLimitExceeded := prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "proxy_rate_limit_exceeded_total",
 				Help: "Total number of requests that exceeded rate limit",
 			},
-			[]string{"ip"},
 		)
 
 		authFailures := prometheus.NewCounter(
@@ -164,8 +163,8 @@ func (m *Metrics) RecordBytesTransferred(direction string, bytes int64) {
 }
 
 // RecordRateLimitExceeded records a rate limit exceeded event
-func (m *Metrics) RecordRateLimitExceeded(ip string) {
-	m.rateLimitExceeded.WithLabelValues(ip).Inc()
+func (m *Metrics) RecordRateLimitExceeded() {
+	m.rateLimitExceeded.Inc()
 }
 
 // RecordAuthFailure records an authentication failure

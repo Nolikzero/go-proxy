@@ -10,11 +10,16 @@ import (
 
 // RateLimiter implements per-IP rate limiting using token bucket algorithm
 type RateLimiter struct {
-	limiters map[string]*rate.Limiter
+	limiters map[string]*limiterEntry
 	mu       sync.RWMutex
 	rate     rate.Limit
 	burst    int
 	cleanup  time.Duration
+}
+
+type limiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 // NewRateLimiter creates a new rate limiter
@@ -22,7 +27,7 @@ type RateLimiter struct {
 // burst: maximum burst size
 func NewRateLimiter(rps int, burst int) *RateLimiter {
 	rl := &RateLimiter{
-		limiters: make(map[string]*rate.Limiter),
+		limiters: make(map[string]*limiterEntry),
 		rate:     rate.Limit(rps),
 		burst:    burst,
 		cleanup:  5 * time.Minute,
@@ -35,23 +40,28 @@ func NewRateLimiter(rps int, burst int) *RateLimiter {
 }
 
 // getLimiter returns the rate limiter for the given IP
-func (rl *RateLimiter) getLimiter(ip string) *rate.Limiter {
+func (rl *RateLimiter) getLimiter(ip string) *limiterEntry {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	limiter, exists := rl.limiters[ip]
+	entry, exists := rl.limiters[ip]
 	if !exists {
-		limiter = rate.NewLimiter(rl.rate, rl.burst)
-		rl.limiters[ip] = limiter
+		entry = &limiterEntry{
+			limiter:  rate.NewLimiter(rl.rate, rl.burst),
+			lastSeen: time.Now(),
+		}
+		rl.limiters[ip] = entry
+	} else {
+		entry.lastSeen = time.Now()
 	}
 
-	return limiter
+	return entry
 }
 
 // Allow checks if a request from the given IP should be allowed
 func (rl *RateLimiter) Allow(ip string) bool {
-	limiter := rl.getLimiter(ip)
-	return limiter.Allow()
+	entry := rl.getLimiter(ip)
+	return entry.limiter.Allow()
 }
 
 // cleanupStale removes stale rate limiters to prevent memory leaks
@@ -61,9 +71,9 @@ func (rl *RateLimiter) cleanupStale() {
 
 	for range ticker.C {
 		rl.mu.Lock()
-		// Remove limiters that haven't been used (have full tokens)
-		for ip, limiter := range rl.limiters {
-			if limiter.Tokens() == float64(rl.burst) {
+		threshold := time.Now().Add(-rl.cleanup)
+		for ip, entry := range rl.limiters {
+			if entry.lastSeen.Before(threshold) {
 				delete(rl.limiters, ip)
 			}
 		}

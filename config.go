@@ -243,7 +243,15 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 
 func getStringSliceEnv(key string, defaultValue []string) []string {
 	if value := os.Getenv(key); value != "" {
-		return strings.Split(value, ",")
+		parts := strings.Split(value, ",")
+		result := make([]string, 0, len(parts))
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		return result
 	}
 	return defaultValue
 }

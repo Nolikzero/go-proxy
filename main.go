@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -79,21 +78,24 @@ func NewProxyServer(config *Config, logger *Logger, metrics *Metrics) *ProxyServ
 
 // Start starts the proxy server
 func (p *ProxyServer) Start() error {
-	// Build middleware chain
-	proxyChain := p.loggingMiddleware(
-		p.metricsMiddleware(
-			p.rateLimitMiddleware(
-				p.authMiddleware(
-					p.hostFilterMiddleware(
-						p.proxyHandler(),
+	buildChain := func(handler http.HandlerFunc) http.HandlerFunc {
+		return p.loggingMiddleware(
+			p.metricsMiddleware(
+				p.rateLimitMiddleware(
+					p.authMiddleware(
+						p.hostFilterMiddleware(handler),
 					),
 				),
 			),
-		),
-	)
+		)
+	}
 
-	healthHandler := p.healthHandler()
-	metricsHandler := p.metrics.Handler()
+	proxyChain := buildChain(p.proxyHandler())
+	healthChain := buildChain(p.healthHandler())
+	metricsHTTPHandler := p.metrics.Handler()
+	metricsChain := buildChain(func(w http.ResponseWriter, r *http.Request) {
+		metricsHTTPHandler.ServeHTTP(w, r)
+	})
 
 	rootHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Serve special endpoints without proxy middleware
@@ -101,11 +103,11 @@ func (p *ProxyServer) Start() error {
 			if r.URL != nil {
 				path := r.URL.Path
 				if path == "/healthz" || path == "/health" {
-					healthHandler(w, r)
+					healthChain(w, r)
 					return
 				}
 				if path == "/metrics" {
-					metricsHandler.ServeHTTP(w, r)
+					metricsChain(w, r)
 					return
 				}
 			}
@@ -237,8 +239,6 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if written > 0 {
 		p.metrics.RecordBytesTransferred("outbound", written)
 	}
-
-	p.logger.LogRequest(r.Method, targetURL.String(), getClientIP(r), r.UserAgent(), resp.StatusCode, duration)
 }
 
 // handleTunnel handles CONNECT method for HTTPS tunneling
@@ -404,7 +404,7 @@ func (p *ProxyServer) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFun
 		if p.config.EnableRateLimit && p.rateLimiter != nil {
 			ip := getClientIP(r)
 			if !p.rateLimiter.Allow(ip) {
-				p.metrics.RecordRateLimitExceeded(ip)
+				p.metrics.RecordRateLimitExceeded()
 				p.logger.Warn("Rate limit exceeded", map[string]interface{}{
 					"remote_ip": ip,
 				})
@@ -478,8 +478,14 @@ func (p *ProxyServer) hostFilterMiddleware(next http.HandlerFunc) http.HandlerFu
 			host = host[:colonIndex]
 		}
 
-		// Check blocked hosts
-		if len(p.config.BlockedHosts) > 0 && slices.Contains(p.config.BlockedHosts, host) {
+		host = normalizeHost(host)
+
+		if host == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if len(p.config.BlockedHosts) > 0 && hostMatchesAny(host, p.config.BlockedHosts) {
 			p.metrics.RecordHostBlocked()
 			p.logger.Warn("Blocked host access attempt", map[string]interface{}{
 				"host":      host,
@@ -489,8 +495,7 @@ func (p *ProxyServer) hostFilterMiddleware(next http.HandlerFunc) http.HandlerFu
 			return
 		}
 
-		// Check allowed hosts (if configured)
-		if len(p.config.AllowedHosts) > 0 && !slices.Contains(p.config.AllowedHosts, host) {
+		if len(p.config.AllowedHosts) > 0 && !hostMatchesAny(host, p.config.AllowedHosts) {
 			p.metrics.RecordHostBlocked()
 			p.logger.Warn("Unauthorized host access attempt", map[string]interface{}{
 				"host":      host,
@@ -570,13 +575,50 @@ func (p *ProxyServer) removeHopByHopHeaders(header http.Header) {
 
 // addForwardedHeaders adds X-Forwarded headers
 func (p *ProxyServer) addForwardedHeaders(proxyReq, originalReq *http.Request) {
-	clientIP := getClientIP(originalReq)
-	proxyReq.Header.Set("X-Forwarded-For", clientIP)
+	clientIP := immediateClientIP(originalReq)
+	if clientIP == "" {
+		clientIP = getClientIP(originalReq)
+	}
+	if existing := proxyReq.Header.Get("X-Forwarded-For"); existing != "" {
+		proxyReq.Header.Set("X-Forwarded-For", existing+", "+clientIP)
+	} else {
+		proxyReq.Header.Set("X-Forwarded-For", clientIP)
+	}
 	proxyReq.Header.Set("X-Forwarded-Proto", getScheme(originalReq))
 
 	if originalReq.Host != "" {
 		proxyReq.Header.Set("X-Forwarded-Host", originalReq.Host)
 	}
+}
+
+func hostMatchesAny(host string, rules []string) bool {
+	for _, rule := range rules {
+		if matchesHostRule(rule, host) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesHostRule(rule, host string) bool {
+	ruleNormalized := normalizeHost(rule)
+	hostNormalized := normalizeHost(host)
+	if ruleNormalized == "" || hostNormalized == "" {
+		return false
+	}
+
+	if strings.HasPrefix(ruleNormalized, "*.") {
+		suffix := strings.TrimPrefix(ruleNormalized, "*")
+		return strings.HasSuffix(hostNormalized, suffix)
+	}
+
+	return hostNormalized == ruleNormalized
+}
+
+func normalizeHost(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(value, ".")
+	return strings.ToLower(value)
 }
 
 // getClientIP extracts the real client IP from request
@@ -599,6 +641,14 @@ func getClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
+	}
+	return host
+}
+
+func immediateClientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return strings.TrimSpace(r.RemoteAddr)
 	}
 	return host
 }

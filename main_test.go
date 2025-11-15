@@ -188,6 +188,101 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
+func TestAddForwardedHeadersAppendsRemoteIP(t *testing.T) {
+	config := &Config{
+		Port:                "8080",
+		ReadTimeout:         30 * time.Second,
+		WriteTimeout:        30 * time.Second,
+		IdleTimeout:         120 * time.Second,
+		ConnectTimeout:      10 * time.Second,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		MaxHeaderBytes:      1048576,
+		MaxBodyBytes:        10485760,
+		LogLevel:            "info",
+		LogFormat:           "json",
+	}
+
+	logger := NewLogger(config)
+	metrics := NewMetrics()
+	proxy := NewProxyServer(config, logger, metrics)
+	proxyReq := httptest.NewRequest("GET", "http://example.com", nil)
+	proxyReq.Header.Set("X-Forwarded-For", "1.1.1.1")
+	originalReq := httptest.NewRequest("GET", "http://example.com", nil)
+	originalReq.RemoteAddr = "2.2.2.2:1234"
+	originalReq.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+	proxy.addForwardedHeaders(proxyReq, originalReq)
+
+	got := proxyReq.Header.Get("X-Forwarded-For")
+	want := "1.1.1.1, 2.2.2.2"
+	if got != want {
+		t.Fatalf("expected %s, got %s", want, got)
+	}
+}
+
+func TestHostFilterSupportsCaseInsensitiveAndWildcard(t *testing.T) {
+	config := &Config{
+		Port:                "8080",
+		ReadTimeout:         30 * time.Second,
+		WriteTimeout:        30 * time.Second,
+		IdleTimeout:         120 * time.Second,
+		ConnectTimeout:      10 * time.Second,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		MaxHeaderBytes:      1048576,
+		MaxBodyBytes:        10485760,
+		AllowedHosts:        []string{"Example.com", "*.corp.local"},
+		BlockedHosts:        []string{"MALICIOUS.COM"},
+		LogLevel:            "info",
+		LogFormat:           "json",
+	}
+
+	logger := NewLogger(config)
+	metrics := NewMetrics()
+	proxy := NewProxyServer(config, logger, metrics)
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	middleware := proxy.hostFilterMiddleware(nextHandler)
+
+	t.Run("allows mixed-case exact match", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "http://EXAMPLE.com/resource", nil)
+		w := httptest.NewRecorder()
+		middleware(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("allows wildcard match", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "http://service.corp.local/resource", nil)
+		w := httptest.NewRecorder()
+		middleware(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("blocks configured host regardless of case", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "http://malicious.com/resource", nil)
+		w := httptest.NewRecorder()
+		middleware(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("expected status 403, got %d", w.Code)
+		}
+	})
+
+	t.Run("blocks host not on allow list", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "http://unknown.com/resource", nil)
+		w := httptest.NewRecorder()
+		middleware(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("expected status 403, got %d", w.Code)
+		}
+	})
+}
+
 // TestGracefulShutdown tests graceful shutdown
 func TestGracefulShutdown(t *testing.T) {
 	config := &Config{
