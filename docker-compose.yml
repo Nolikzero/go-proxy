@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  go-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go-proxy
+    ports:
+      - "8080:8080"
+    environment:
+      # Server configuration
+      - PROXY_PORT=8080
+      - PROXY_HOST=
+      - PROXY_READ_TIMEOUT=30s
+      - PROXY_WRITE_TIMEOUT=30s
+      - PROXY_IDLE_TIMEOUT=120s
+      
+      # TLS configuration (uncomment and configure for HTTPS)
+      # - PROXY_ENABLE_TLS=true
+      # - PROXY_TLS_CERT_FILE=/certs/server.crt
+      # - PROXY_TLS_KEY_FILE=/certs/server.key
+      
+      # Proxy configuration
+      - PROXY_ENABLE_HTTPS=true
+      - PROXY_CONNECT_TIMEOUT=10s
+      - PROXY_MAX_IDLE_CONNS=100
+      - PROXY_MAX_IDLE_CONNS_PER_HOST=10
+      
+      # Security configuration (uncomment to enable)
+      # - PROXY_REQUIRE_AUTH=true
+      # - PROXY_AUTH_USER=admin
+      # - PROXY_AUTH_PASSWORD=secret
+      # - PROXY_ALLOWED_HOSTS=example.com,api.example.com
+      # - PROXY_BLOCKED_HOSTS=malicious.com
+      
+      # Logging configuration
+      - PROXY_LOG_LEVEL=info
+      - PROXY_LOG_FORMAT=json
+      
+      # Limits
+      - PROXY_MAX_HEADER_BYTES=1048576
+    # volumes:
+      # Uncomment to mount TLS certificates
+      # - ./certs:/certs:ro
+      # Uncomment to mount logs directory
+      # - ./logs:/logs
+    restart: unless-stopped
+    networks:
+      - proxy-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  proxy-network:
+    driver: bridge
